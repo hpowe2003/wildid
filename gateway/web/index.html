@@ -20,7 +20,7 @@ button{background:var(--acc);color:var(--bg);border-color:var(--acc);cursor:poin
 th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
 .flag{color:var(--warn);font-weight:bold}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;margin:0}dt{color:var(--mut)}dd{margin:0}
-</style></head><body><main>
+.alert{border-left:4px solid var(--warn);background:var(--card);padding:.5rem .9rem;margin:.5rem 0}.alert p{margin:.2rem 0}pre{white-space:pre-wrap;font:inherit}</style></head><body><main>
 <h1>Know each animal by its markings</h1>
 <p class="lead">Upload a cropped photo of a spotted or striped animal. WildID compares its pattern with known individuals and logs the sighting.</p>
 <form id="f">
@@ -33,6 +33,11 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;margin:0}dt
 <div id="msg" role="status"></div>
 <h2>Sightings</h2>
 <div class="tw"><table><thead><tr><th>Animal</th><th>Species</th><th>Location</th><th>Match</th><th>Time</th></tr></thead><tbody id="rows"></tbody></table></div>
+<h2>AI triage alerts</h2>
+<div id="alerts"><p class="lead">No alerts yet. Re-sightings and low-confidence matches are reviewed automatically.</p></div>
+<h2>Ask the agent</h2>
+<form id="ask"><label style="grid-column:1/-1">Question<input name="q" required placeholder="Which animals were seen in more than one place?"></label><button>Ask agent</button></form>
+<pre id="ans" role="status"></pre>
 <h2>Model health</h2>
 <dl id="mon"></dl>
 </main>
@@ -47,6 +52,10 @@ async function load(){
   cell(tr,x.individual_id);cell(tr,x.species);cell(tr,x.lat.toFixed(3)+', '+x.lon.toFixed(3));
   cell(tr,(x.matched_existing?'Known · ':'New · ')+(x.similarity*100).toFixed(1)+'%'+(x.needs_review?' · review':''),x.needs_review?'flag':'');
   cell(tr,new Date(x.at).toLocaleString());});
+ const al=await (await fetch('/api/alerts')).json();
+ if(al.length){const box=$('#alerts');box.replaceChildren();al.slice().reverse().forEach(a=>{const d=document.createElement('div');d.className='alert';
+  const b=document.createElement('strong');b.textContent=a.severity+' priority · sighting #'+a.sighting_id;
+  const p=document.createElement('p');p.textContent=a.summary+' Recommended: '+a.recommended_action;d.append(b,p);box.append(d)})}
  try{const [m,k]=await Promise.all([fetch('/api/model').then(r=>r.json()),fetch('/api/monitor').then(r=>r.json())]);
   const dl=$('#mon');dl.replaceChildren();
   [['Model',m.name+' v'+m.version],['Known animals',m.gallery_size],['Requests scored',k.requests_scored],
@@ -60,5 +69,8 @@ $('#f').addEventListener('submit',async e=>{e.preventDefault();const m=$('#msg')
  if(!r.ok){m.className='err';m.textContent=j.error||j.detail||'Upload failed. Try another image.';return}
  m.textContent=(j.matched_existing?'Matched known animal ':'Logged new animal ')+j.individual_id+(j.needs_review?' – low confidence, please review.':'.');
  e.target.file.value='';load()});
-load();
+$('#ask').addEventListener('submit',async e=>{e.preventDefault();const o=$('#ans');o.textContent='Thinking…';
+ const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:e.target.q.value})});
+ const j=await r.json().catch(()=>({}));o.textContent=r.ok?j.answer:(j.detail||j.error||'Agent unavailable.')});
+load();setInterval(load,15000);
 </script></body></html>

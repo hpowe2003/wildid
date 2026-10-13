@@ -1,15 +1,28 @@
 services:
   ml:
     build: ./ml
-    environment: [DATA_DIR=/data]
+    environment:
+      DATA_DIR: /data
     volumes: [ml-data:/data]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')"]
       interval: 5s
       retries: 10
+  agent:
+    build: ./agent
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      AGENT_TOKEN: ${AGENT_TOKEN:-dev-token}
   gateway:
     build: ./gateway
-    environment: [ML_URL=http://ml:8000, DATA_DIR=/data]
+    environment:
+      ML_URL: http://ml:8000
+      AGENT_URL: http://agent:8000
+      AGENT_TOKEN: ${AGENT_TOKEN:-dev-token}
+      DATA_DIR: /data
     volumes: [gw-data:/data]
     ports: ["8080:8080"]
     depends_on:

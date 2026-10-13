@@ -98,17 +98,23 @@ func addSighting(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(filepath.Dir(dataFile), 0o755)
 	os.WriteFile(dataFile, b, 0o644)
 	mu.Unlock()
+	if s.NeedsReview || s.Matched {
+		go triage(s)
+	}
 	writeJSON(w, 201, s)
 }
 
-func listSightings(w http.ResponseWriter, _ *http.Request) {
+func listSightings(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
-	if sightings == nil {
-		writeJSON(w, 200, []Sighting{})
-		return
+	out := []Sighting{}
+	id := r.URL.Query().Get("individual_id")
+	for _, s := range sightings {
+		if id == "" || s.IndividualID == id {
+			out = append(out, s)
+		}
 	}
-	writeJSON(w, 200, sightings)
+	writeJSON(w, 200, out)
 }
 
 func proxy(path string) http.HandlerFunc {
@@ -124,15 +130,89 @@ func proxy(path string) http.HandlerFunc {
 	}
 }
 
+type Alert struct {
+	ID         int       `json:"id"`
+	SightingID int       `json:"sighting_id"`
+	Severity   string    `json:"severity"`
+	Summary    string    `json:"summary"`
+	Action     string    `json:"recommended_action"`
+	At         time.Time `json:"at"`
+}
+
+var (
+	alerts      = []Alert{}
+	agentURL    = env("AGENT_URL", "http://agent:8000")
+	alertFile   = filepath.Join(env("DATA_DIR", "./data"), "alerts.json")
+	agentClient = &http.Client{Timeout: 90 * time.Second}
+)
+
+// triage asks the LLM agent to investigate a sighting. Failures never block uploads.
+func triage(s Sighting) {
+	b, _ := json.Marshal(s)
+	resp, err := agentClient.Post(agentURL+"/triage", "application/json", bytes.NewReader(b))
+	if err != nil {
+		log.Println("triage skipped:", err)
+		return
+	}
+	resp.Body.Close()
+}
+
+func addAlert(w http.ResponseWriter, r *http.Request) {
+	if t := os.Getenv("AGENT_TOKEN"); t != "" && r.Header.Get("X-Agent-Token") != t {
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	var a Alert
+	if json.NewDecoder(r.Body).Decode(&a) != nil || a.Summary == "" ||
+		(a.Severity != "low" && a.Severity != "medium" && a.Severity != "high") {
+		writeJSON(w, 400, map[string]string{"error": "invalid alert"})
+		return
+	}
+	mu.Lock()
+	a.ID, a.At = len(alerts)+1, time.Now().UTC()
+	alerts = append(alerts, a)
+	b, _ := json.Marshal(alerts)
+	os.MkdirAll(filepath.Dir(alertFile), 0o755)
+	os.WriteFile(alertFile, b, 0o644)
+	mu.Unlock()
+	writeJSON(w, 201, a)
+}
+
+func listAlerts(w http.ResponseWriter, _ *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+	writeJSON(w, 200, alerts)
+}
+
+func ask(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+	resp, err := agentClient.Post(agentURL+"/ask", "application/json", r.Body)
+	if err != nil {
+		writeJSON(w, 502, map[string]string{"error": "agent unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 func main() {
 	if b, err := os.ReadFile(dataFile); err == nil {
 		json.Unmarshal(b, &sightings)
+	}
+	if b, err := os.ReadFile(alertFile); err == nil {
+		json.Unmarshal(b, &alerts)
 	}
 	sub, _ := fs.Sub(web, "web")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 	mux.HandleFunc("POST /api/sightings", addSighting)
 	mux.HandleFunc("GET /api/sightings", listSightings)
+	mux.HandleFunc("POST /api/alerts", addAlert)
+	mux.HandleFunc("GET /api/alerts", listAlerts)
+	mux.HandleFunc("POST /api/ask", ask)
 	mux.HandleFunc("GET /api/model", proxy("/model"))
 	mux.HandleFunc("GET /api/monitor", proxy("/monitor"))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
