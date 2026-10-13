@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WildID – track individual animals by coat pattern</title>
+<style>
+:root{--bg:#f3efe6;--ink:#1d2a22;--mut:#5c6b60;--card:#fffdf7;--line:#d8d1bf;--acc:#2f6b4f;--warn:#b45309}
+@media(prefers-color-scheme:dark){:root{--bg:#141a16;--ink:#e8eadf;--mut:#9aa89d;--card:#1c241f;--line:#2f3b33;--acc:#6fbf94;--warn:#f0a35a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Georgia,"Times New Roman",serif}
+main{max-width:980px;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:clamp(2rem,6vw,3.4rem);line-height:1.05;margin:0 0 .5rem;letter-spacing:-.02em}
+p.lead{max-width:60ch;color:var(--mut);margin:0 0 2rem}
+h2{font-size:1.15rem;margin:2.2rem 0 .7rem}
+form{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));background:var(--card);border:1px solid var(--line);padding:1rem;border-radius:6px}
+label{display:grid;gap:.25rem;font-size:.9rem;color:var(--mut)}
+input,button{font:inherit;padding:.55rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink)}
+button{background:var(--acc);color:var(--bg);border-color:var(--acc);cursor:pointer;align-self:end}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#msg{min-height:1.5rem;margin:.6rem 0}.err{color:var(--warn)}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;background:var(--card)}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
+.flag{color:var(--warn);font-weight:bold}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;margin:0}dt{color:var(--mut)}dd{margin:0}
+</style></head><body><main>
+<h1>Know each animal by its markings</h1>
+<p class="lead">Upload a cropped photo of a spotted or striped animal. WildID compares its pattern with known individuals and logs the sighting.</p>
+<form id="f">
+ <label>Species<input name="species" required placeholder="cheetah"></label>
+ <label>Latitude<input name="lat" type="number" step="any" required value="32.60"></label>
+ <label>Longitude<input name="lon" type="number" step="any" required value="-85.48"></label>
+ <label>Photo<input name="file" type="file" accept="image/*" required></label>
+ <button>Identify animal</button>
+</form>
+<div id="msg" role="status"></div>
+<h2>Sightings</h2>
+<div class="tw"><table><thead><tr><th>Animal</th><th>Species</th><th>Location</th><th>Match</th><th>Time</th></tr></thead><tbody id="rows"></tbody></table></div>
+<h2>Model health</h2>
+<dl id="mon"></dl>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const cell=(tr,t,c)=>{const td=document.createElement('td');td.textContent=t;if(c)td.className=c;tr.append(td)};
+async function load(){
+ const s=await (await fetch('/api/sightings')).json();
+ const rows=$('#rows');rows.replaceChildren();
+ if(!s.length){const tr=rows.insertRow();cell(tr,'No sightings yet. Upload a photo above.');}
+ s.slice().reverse().forEach(x=>{const tr=rows.insertRow();
+  cell(tr,x.individual_id);cell(tr,x.species);cell(tr,x.lat.toFixed(3)+', '+x.lon.toFixed(3));
+  cell(tr,(x.matched_existing?'Known · ':'New · ')+(x.similarity*100).toFixed(1)+'%'+(x.needs_review?' · review':''),x.needs_review?'flag':'');
+  cell(tr,new Date(x.at).toLocaleString());});
+ try{const [m,k]=await Promise.all([fetch('/api/model').then(r=>r.json()),fetch('/api/monitor').then(r=>r.json())]);
+  const dl=$('#mon');dl.replaceChildren();
+  [['Model',m.name+' v'+m.version],['Known animals',m.gallery_size],['Requests scored',k.requests_scored],
+   ['Share flagged for review',(k.review_rate*100).toFixed(1)+'%'],['Drift',k.drift_flag?'Detected – retrain or re-check data':'None detected']]
+   .forEach(([a,b])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=a;dd.textContent=b;dl.append(dt,dd)});
+ }catch{}
+}
+$('#f').addEventListener('submit',async e=>{e.preventDefault();const m=$('#msg');m.className='';m.textContent='Identifying…';
+ const r=await fetch('/api/sightings',{method:'POST',body:new FormData(e.target)});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok){m.className='err';m.textContent=j.error||j.detail||'Upload failed. Try another image.';return}
+ m.textContent=(j.matched_existing?'Matched known animal ':'Logged new animal ')+j.individual_id+(j.needs_review?' – low confidence, please review.':'.');
+ e.target.file.value='';load()});
+load();
+</script></body></html>

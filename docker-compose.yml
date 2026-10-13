@@ -1,0 +1,19 @@
+services:
+  ml:
+    build: ./ml
+    environment: [DATA_DIR=/data]
+    volumes: [ml-data:/data]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      retries: 10
+  gateway:
+    build: ./gateway
+    environment: [ML_URL=http://ml:8000, DATA_DIR=/data]
+    volumes: [gw-data:/data]
+    ports: ["8080:8080"]
+    depends_on:
+      ml: {condition: service_healthy}
+volumes:
+  ml-data:
+  gw-data:
