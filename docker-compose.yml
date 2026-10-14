@@ -13,7 +13,7 @@ services:
     environment:
       GATEWAY_URL: http://gateway:8080
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.8-flash}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
       AGENT_TOKEN: ${AGENT_TOKEN:-dev-token}
   gateway:
