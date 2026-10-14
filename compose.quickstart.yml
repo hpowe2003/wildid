@@ -1,0 +1,38 @@
+# Run WildID from prebuilt images. No build, no source code needed.
+#   docker compose -f compose.quickstart.yml up -d
+name: wildid
+services:
+  ml:
+    image: ghcr.io/hpowe2003/wildid/ml:latest
+    pull_policy: always
+    environment:
+      DATA_DIR: /data
+    volumes: [ml-data:/data]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      retries: 10
+  agent:
+    image: ghcr.io/hpowe2003/wildid/agent:latest
+    pull_policy: always
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.8-flash}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      AGENT_TOKEN: ${AGENT_TOKEN:-dev-token}
+  gateway:
+    image: ghcr.io/hpowe2003/wildid/gateway:latest
+    pull_policy: always
+    environment:
+      ML_URL: http://ml:8000
+      AGENT_URL: http://agent:8000
+      AGENT_TOKEN: ${AGENT_TOKEN:-dev-token}
+      DATA_DIR: /data
+    volumes: [gw-data:/data]
+    ports: ["8080:8080"]
+    depends_on:
+      ml: {condition: service_healthy}
+volumes:
+  ml-data:
+  gw-data:
